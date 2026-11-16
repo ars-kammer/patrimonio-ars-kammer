@@ -61,7 +61,7 @@ export default function ScannerQR({ onLer, status }: { onLer: (raw: string) => v
         setErro(null);
         raf = requestAnimationFrame(tick);
       } catch {
-        if (ativo) setErro("Câmera não disponível. Libere o acesso à câmera no navegador ou digite o código.");
+        if (ativo) setErro("Câmera não disponível. Libere o acesso à câmera nas configurações do navegador.");
       }
     })();
 

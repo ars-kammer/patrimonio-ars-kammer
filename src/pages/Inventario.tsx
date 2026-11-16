@@ -7,25 +7,32 @@ import { Miniatura } from "@/components/Foto";
 import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
-import { useCiclos, useItens, useLocais, usePendencias, useRecarregar, useUsuarios } from "@/lib/dados";
+import { minhasAbertas, useCiclos, useItens, useLocais, usePendencias, useRecarregar, useUsuarios } from "@/lib/dados";
 import { useFotos } from "@/lib/foto";
 import { codigoDoQR } from "@/lib/qr";
 import { mensagemErro } from "@/lib/erros";
-import { btnPrimario, btnSecundario, card, fmtCodigo, fmtDate, fmtDateTime, freqLabel, input } from "@/lib/ui";
+import { btnPrimario, btnSecundario, card, fmtCodigo, fmtDate, fmtDateTime, freqLabel, hojeISO } from "@/lib/ui";
 import type { Ciclo, Item, Pendencia } from "@/types";
 
 export default function Inventario() {
   const { user, isAdmin } = useAuth();
   const { data: pendencias, isLoading } = usePendencias();
   const { data: itens = [] } = useItens();
+  const { data: ciclos = [] } = useCiclos();
   const recarregar = useRecarregar();
   const toast = useToast();
   const [confirmando, setConfirmando] = useState<Pendencia | null>(null);
   const [forcando, setForcando] = useState(false);
 
-  const minhas = (pendencias ?? []).filter((p) => p.status === "pending" && p.responsavel_id === user?.id);
-  const recv = minhas.filter((p) => p.tipo === "recv");
-  const inv = minhas.filter((p) => p.tipo === "inv");
+  const { abertas, recv, inv } = minhasAbertas(pendencias ?? [], user?.id);
+  const minhas = [...recv, ...inv];
+  // Item com check-in aberto em ciclo de prazo vencido: ainda dá para confirmar.
+  const hoje = hojeISO();
+  const atrasados = new Set(
+    abertas
+      .filter((p) => p.tipo === "inv" && (ciclos.find((c) => c.id === p.ciclo_id)?.prazo ?? hoje) < hoje)
+      .map((p) => p.item_id),
+  );
   const itemDe = (p: Pendencia) => itens.find((i) => i.id === p.item_id);
   const { data: fotos } = useFotos(minhas.map((p) => itemDe(p)?.foto_path ?? null));
 
@@ -58,6 +65,11 @@ export default function Inventario() {
                     {fmtCodigo(it.codigo)}
                     {it.modelo ? ` · ${it.modelo}` : ""} · {tag}
                   </p>
+                  {p.tipo === "inv" && atrasados.has(p.item_id) && (
+                    <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                      Atrasado
+                    </span>
+                  )}
                 </div>
                 <button onClick={() => setConfirmando(p)} className={btnPrimario}>
                   <ScanLine size={15} /> <span className="hidden sm:inline">Escanear</span>
@@ -128,7 +140,6 @@ function ConfirmarQR({
   const [status, setStatus] = useState<{ tipo: "info" | "ok" | "erro"; msg: string }>({
     tipo: "info", msg: `Aponte para o QR Code ${fmtCodigo(item.codigo)}`,
   });
-  const [manual, setManual] = useState("");
   const [enviando, setEnviando] = useState(false);
 
   async function conferir(codigo: number | null) {
@@ -158,32 +169,34 @@ function ConfirmarQR({
         <ScannerQR onLer={(raw) => conferir(codigoDoQR(raw))} status={<StatusLeitura tipo={status.tipo}>{status.msg}</StatusLeitura>} />
       )}
       {enviando && <StatusLeitura tipo={status.tipo}>{status.msg}</StatusLeitura>}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          const n = parseInt(manual, 10);
-          conferir(Number.isFinite(n) ? n : null);
-        }}
-        className="mt-4 flex gap-2 border-t border-[#e5e7eb] pt-4"
-      >
-        <input
-          inputMode="numeric"
-          value={manual}
-          onChange={(e) => setManual(e.target.value.replace(/\D/g, ""))}
-          placeholder="Etiqueta ilegível? Digite o código"
-          className={`${input} font-mono`}
-        />
-        <button type="submit" disabled={enviando} className={btnSecundario}>Confirmar</button>
-      </form>
+      <p className="mt-4 border-t border-[#e5e7eb] pt-4 text-xs text-[#6b7280]">
+        Etiqueta ilegível ou danificada? Peça ao administrador para reimprimir — a confirmação é só pelo QR Code.
+      </p>
     </Modal>
   );
 }
 
-const STATUS_CICLO: Record<Ciclo["status"], { label: string; cor: string }> = {
-  active: { label: "Em andamento", cor: "bg-[#C0392B]" },
-  completed: { label: "Concluído", cor: "bg-emerald-600" },
-  expired: { label: "Expirado", cor: "bg-[#9ca3af]" },
-};
+/** Data local (BRT) de um timestamp, para comparar com o prazo sem cair no dia seguinte do UTC. */
+function diaLocal(ts: string): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function statusCiclo(c: Ciclo, ps: Pendencia[]): { label: string; cor: string } {
+  const pendente = ps.some((p) => p.status === "pending");
+  const vencido = c.prazo < hojeISO();
+  if (c.status === "completed") {
+    const tarde = ps.some((p) => p.status === "confirmed" && p.confirmado_em && diaLocal(p.confirmado_em) > c.prazo);
+    return tarde
+      ? { label: "Concluído com atraso", cor: "bg-emerald-600" }
+      : { label: "Concluído", cor: "bg-emerald-600" };
+  }
+  if (pendente && (c.status === "expired" || vencido)) {
+    return { label: `Atrasado · prazo ${fmtDate(c.prazo)}`, cor: "bg-amber-500" };
+  }
+  if (c.status === "active") return { label: `Em andamento · prazo ${fmtDate(c.prazo)}`, cor: "bg-[#C0392B]" };
+  return { label: "Expirado", cor: "bg-[#9ca3af]" };
+}
 
 function Acompanhamento({ pendencias, itens }: { pendencias: Pendencia[]; itens: Item[] }) {
   const { data: ciclos = [] } = useCiclos();
@@ -227,6 +240,7 @@ function Acompanhamento({ pendencias, itens }: { pendencias: Pendencia[]; itens:
                   const ps = pendencias.filter((p) => p.ciclo_id === c.id);
                   const feitos = ps.filter((p) => p.status === "confirmed").length;
                   const pct = ps.length ? Math.round((feitos / ps.length) * 100) : 0;
+                  const st = statusCiclo(c, ps);
                   const aberto = abertos.has(c.id) || (c.status === "active" && !abertos.has("x" + c.id));
                   const alternar = () =>
                     setAbertos((s) => {
@@ -239,12 +253,11 @@ function Acompanhamento({ pendencias, itens }: { pendencias: Pendencia[]; itens:
                   return (
                     <div key={c.id} className={card}>
                       <button onClick={alternar} className="flex w-full items-center gap-3 px-4 py-3 text-left">
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_CICLO[c.status].cor}`} />
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${st.cor}`} />
                         <span className="flex-1 text-sm">
                           <span className="font-medium">Ciclo {fmtDate(c.criado_em)}</span>
                           <span className="ml-2 text-xs text-[#9ca3af]">
-                            {STATUS_CICLO[c.status].label}
-                            {c.status === "active" && ` · prazo ${fmtDate(c.prazo)}`}
+                            {st.label}
                           </span>
                         </span>
                         <span className="text-xs text-[#6b7280]">{feitos}/{ps.length}</span>
@@ -268,11 +281,16 @@ function Acompanhamento({ pendencias, itens }: { pendencias: Pendencia[]; itens:
                                 {p.status === "confirmed" ? (
                                   <span className="text-right text-xs text-emerald-700">
                                     ✓ {p.confirmado_por_nome} · {fmtDateTime(p.confirmado_em)}
+                                    {p.confirmado_em && diaLocal(p.confirmado_em) > c.prazo && (
+                                      <span className="ml-1 text-amber-700">(atrasado)</span>
+                                    )}
                                   </span>
                                 ) : p.status === "cancelled" ? (
                                   <span className="text-xs text-[#9ca3af]">Não confirmado</span>
                                 ) : (
-                                  <span className="text-xs text-amber-700">Pendente</span>
+                                  <span className="text-xs text-amber-700">
+                                    {c.prazo < hojeISO() ? "Atrasado" : "Pendente"}
+                                  </span>
                                 )}
                               </div>
                             );

@@ -106,3 +106,19 @@ export function proximoCodigo(itens: Item[]): number {
   while (usados.has(n)) n++;
   return n;
 }
+
+/**
+ * Pendências abertas do usuário, uma por item no check-in: o mesmo item pode
+ * estar em aberto no ciclo atual e em ciclos atrasados, e um scan resolve todos.
+ * Vem da mais recente para a mais antiga, então fica a do ciclo atual.
+ */
+export function minhasAbertas(pendencias: Pendencia[], userId: string | undefined) {
+  const abertas = pendencias.filter((p) => p.status === "pending" && p.responsavel_id === userId);
+  const vistos = new Set<string>();
+  const inv = abertas.filter((p) => {
+    if (p.tipo !== "inv" || vistos.has(p.item_id)) return false;
+    vistos.add(p.item_id);
+    return true;
+  });
+  return { abertas, recv: abertas.filter((p) => p.tipo === "recv"), inv };
+}

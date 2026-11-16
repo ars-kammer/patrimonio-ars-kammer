@@ -5,7 +5,7 @@ import Layout, { Carregando } from "@/components/Layout";
 import ItemDetalhe from "@/components/ItemDetalhe";
 import { Miniatura } from "@/components/Foto";
 import { useAuth } from "@/lib/auth";
-import { useCiclos, useEventos, useItens, useLocais, usePendencias } from "@/lib/dados";
+import { minhasAbertas, useCiclos, useEventos, useItens, useLocais, usePendencias } from "@/lib/dados";
 import { useFotos } from "@/lib/foto";
 import { badge, card, codChip, ESTADO_BADGE, ESTADO_COR, ESTADOS, fmtCodigo, fmtDateTime, fmtMoeda, SETORES } from "@/lib/ui";
 import type { Evento, Item } from "@/types";
@@ -76,9 +76,9 @@ export default function Dashboard() {
   const { data: itens, isLoading } = useItens();
   const { data: pendencias = [] } = usePendencias();
 
-  const minhas = pendencias.filter((p) => p.status === "pending" && p.responsavel_id === user?.id);
-  const recv = minhas.filter((p) => p.tipo === "recv").length;
-  const inv = minhas.filter((p) => p.tipo === "inv").length;
+  const minhas = minhasAbertas(pendencias, user?.id);
+  const recv = minhas.recv.length;
+  const inv = minhas.inv.length;
 
   return (
     <Layout titulo="Visão geral">

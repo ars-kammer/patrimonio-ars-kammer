@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
-import { usePendencias } from "@/lib/dados";
+import { minhasAbertas, usePendencias } from "@/lib/dados";
 import { iniciais, PAPEIS } from "@/lib/ui";
 
 const ITENS = [
@@ -24,7 +24,8 @@ export default function Layout({ children, titulo, acao }: { children: ReactNode
   const navigate = useNavigate();
   const [menuAberto, setMenuAberto] = useState(false);
   const { data: pendencias = [] } = usePendencias();
-  const minhas = pendencias.filter((p) => p.status === "pending" && p.responsavel_id === user?.id).length;
+  const { recv: mRecv, inv: mInv } = minhasAbertas(pendencias, user?.id);
+  const minhas = mRecv.length + mInv.length;
 
   const permitidas = papel ? PAPEIS[papel].paginas : [];
 
